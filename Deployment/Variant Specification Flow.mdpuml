@@ -1,0 +1,175 @@
+@startuml
+box "TOCC Service UI" #AAFFFF
+actor "User" as u
+participant "TOCC Service UI" as ui
+end box
+box "Software Service" #AAAAFF
+participant "CarConfigController" as ccc
+participant "PartController" as pc
+participant "VariantSpecificationController" as vsc
+participant "VariantSpecificationSpa2Controller" as vsspa2c
+participant "CarConfigService" as ccs
+participant "TestObjectOrderService" as toos
+participant "ConfigHubService" as chs
+participant "VariantSpecificationSpa2Service" as vsspa2s
+participant "KdpService" as kdps
+database "SoftwareServiceContext" as db
+end box
+box "KDP" #Gray
+participant "KDP" as kdp
+end box
+box ConfigHub #Silver
+participant "ConfigHub" as ch
+end box
+box "PIE" #LightGray
+participant "Local PIE" as pie
+end box
+
+group #Pink POST/v1/CarConfig/GetCarConfigFromPie
+	u->ui: Download CarConfig for Variant Specification Version
+	ui-[#hotpink]>ccc: GetCarConfigFromPie
+	note left
+		CarConfigRequest <b>(TOBE)</b>
+		{
+			TestObjectOrderId, 
+			<b>VariantSpecificationVersionId</b>,
+			optional TemplateFile
+		}
+	end note
+	alt #Crimson Request is not valid
+		ccc->ui: 500 Internal Server Error
+		ui->u: Error message
+	end
+	ccc->ccs: GetCarConfigFromLocalPieAsync
+	ccs->db: Get Varaiant Spesification Version
+	db->ccs: VariantSpecificationVersion
+	ccs->ccs: Transform to Kdp format
+	ccs->kdps: TranslateVariantSpecificationToDownloadable
+	alt #Crimson VariantSpecificationVersion is not standard format
+		ccs->ccc: Variant specification is not standard format
+		ccc->ui: 500 Internal Server Error
+		ui->u: Error message
+	end
+	kdps->kdp: kdp/variantspecification/v100/translate
+	kdp->kdps: KdpVariantSpecificationResponse
+	kdps->ccs: KdpVariantSpecification
+	ccs->ccs: Transform to PieCarConfigInfoRequest
+	ccs->pie: GetCarConfigFromLocalPie
+	pie->ccs: PieCarConfigResponse
+	ccs->ccs: Transform to CarConfigResponse
+	ccs->ccc: CarConfigResponse
+	ccc->ui: CarConfigResponse
+		note right 
+		CarConfigResponse
+		{
+			TestObjectOrderId,
+			DownloadableConfigurationFiles,
+			Version,
+			FactoryOrderNumber,
+			VcdFile
+		}
+	end note
+	ui->u: Downloads CarConfig Zip
+end
+
+
+group #LightGreen POST/v1/Part/PostSoftwaresForEventConfiguration
+	u->ui: TBD???
+	ui-[#hotpink]>pc: TBD???
+	note left
+		PartSoftwareRequest <b>(TOBE)</b>
+		{
+			baseConfigId,
+			<b>variantSpecificationVersionId</b>
+		}
+	end note
+	pc->chs: GetSoftwaresForEventConfiguration
+	chs->chs: Transform to SoftwareForEventConfigurationRequestModel
+	chs->ch: api/v2/solve/softwaresForEventConfiguration
+	ch->chs: ConfigHubSoftwaresForEventConfigurationResult
+	chs->pc: ConfigHubSoftwaresForEventConfigurationResult
+	pc->ui:??? ConfigHubSoftwaresForEventConfigurationResult
+	ui->u: ???
+end
+
+group #Azure POST/v1/VariantSpecification/GetVehicleConfigurationDataContent
+	u->ui: Download Vehicle Configuration Data (VCD) for a specific Variant Specification Version
+	ui-[#hotpink]>vsc: GetVehicleConfigurationDataContent
+	note left
+		VehicleConfigurationDataContentRequest <b>(TOBE)</b>
+		{
+			TestObjectOrderId,
+			<b>VariantSpecificationVersionId</b>
+		}
+	end note
+ 	vsc->vsspa2s: GetVehicleConfigurationDataContente
+	alt #Crimson VariantSpecificationVersion is not standard format
+		vsspa2s->vsc: Variant specification is not standard format
+		vsc->ui: 500 Internal Server Error
+		ui->u: Error message
+	end
+	vsspa2s->db: Get TestObjectOrder based on TestObjectOrderId
+	db->vsspa2s: TestObjectOrder or default
+	alt #Crimson TestObjectOrder not found
+		vsspa2s->vsc: TestObjectOrderNotFoundException
+		vsc->ui: 500 Internal Server Error
+		ui->u: Error message
+	end
+	vsspa2s->kdps: TranslateVariantSpecificationToDownloadable
+	kdps->kdp: kdp/variantspecification/v100/translate
+	kdp->kdps: KdpVariantSpecificationResponse
+	kdps->vsspa2s: KdpVariantSpecification
+	vsspa2s->vsspa2s: Transform KdpVariantSpesification to VehicleConfigurationDataContentResponse
+	vsspa2s->vsc: VehicleConfigurationDataContentResponse
+	vsc->ui: VehicleConfigurationDataContentResponse
+	note right
+		VehicleConfigurationDataContentResponse
+		{ 
+			List<Base64File> Files
+		}
+	end note
+	ui->ui: Translate Base64Files to VCD Zip
+	ui->u: Downloads VCD Zip
+end group
+
+group #Violet POST/v1/VariantSpecificationSpa2/VehicleConfigInfo/VariantSpecification/pvo
+	u->ui: TBD???
+	ui-[#hotpink]>vsspa2c: TBD???
+	note left
+		VehicleConfigInfoVariantSpecificationRequest <b>(TOBE)</b>
+		{
+			TestObjectOrderId,
+			User,
+			<b>VariantSpecificationVersionId</b>
+		}
+	end note
+	alt #Crimson TestObjectOrder not found
+		vsspa2c->ui: 400 Null or empty testObjectOrderId
+		ui->u: Error message
+	end
+	vsspa2c->vsspa2s: SendVehicleConfigInfoMessageAsync
+	alt #Crimson TestObjectOrder not found
+		vsspa2c<-vsspa2s: TestObjectOrderNotFoundException
+		vsspa2c->ui: 500 TestObjectOrderId not found
+		ui->u: Error message
+	end
+	vsspa2s->kdps: TranslateVariantSpecificationToDownloadable
+	kdps->kdp: kdp/variantspecification/v100/translate
+	kdp->kdps: KdpVariantSpecificationResponse
+	kdps->vsspa2s: KdpVariantSpecification
+	vsspa2s->vsspa2s: Transform KdpVariantSpesification to PieVehicleConfigInfoRequest
+	vsspa2s->vsspa2s: GetPieUrl
+	vsspa2s->vsspa2s: SendVehicleConfigInfoMessageAsync
+	vsspa2s->pie: sws/api/v1/vehicleconfiginfo
+	vsspa2s<-pie: HttpResponseMessage
+	vsspa2s->vsspa2s: UpdateHistoryAsync
+	vsspa2s->db: Gfet TestObjectOrder based on TestObjectOrderId
+	db->vsspa2s: TestObjectOrder or default
+	vsspa2s->vsspa2s: Update chagelog
+	vsspa2s->db: Save changes
+	vsspa2c<-vsspa2s: pie response
+	vsspa2c->ui: pie response
+	ui->u: ???
+end group
+
+@enduml
